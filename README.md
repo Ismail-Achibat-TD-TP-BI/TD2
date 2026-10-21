@@ -1,5 +1,7 @@
 # Smart Mobility Le Mans
 
+Dashboard link: https://ismail-achibat-td-tp-bi.github.io/TD2/
+
 Live monitoring of Le Mans Métropole's SETRAM bus and tram network, built to support one
 question: *with limited resources, where and when should public transport be improved first?*
 
