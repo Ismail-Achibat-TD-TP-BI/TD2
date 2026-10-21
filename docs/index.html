@@ -99,21 +99,17 @@ fetch('data/current_state.json')
       return;
     }
 
-    function scoreToColor(t) {
-      const clamped = Math.max(0, Math.min(1, t));
-      const hue = 120 * clamped; // 0 = red (worst), 120 = green (best)
-      return `hsl(${hue.toFixed(0)}, 70%, 45%)`;
+    // Early is not "good": green only inside the on-time window, then red for late
+    // and blue for early, darker the further off schedule (full shade 3 min beyond).
+    const ON_TIME_WINDOW_S = 60;
+    function delayToColor(d) {
+      if (Math.abs(d) <= ON_TIME_WINDOW_S) return 'hsl(130, 55%, 42%)';
+      const hue = d > 0 ? 0 : 215; // 0 = red (late), 215 = blue (early)
+      const excess = Math.min((Math.abs(d) - ON_TIME_WINDOW_S) / 180, 1);
+      const lightness = 62 - 27 * excess;
+      return `hsl(${hue}, 70%, ${lightness.toFixed(0)}%)`;
     }
-    function normalizeForColor(values, invert) {
-      const lo = Math.min(...values);
-      const hi = Math.max(...values);
-      if (hi === lo) return values.map(() => 0.5);
-      const scaled = values.map(v => (v - lo) / (hi - lo));
-      return invert ? scaled.map(s => 1 - s) : scaled;
-    }
-    // lower delay = greener, higher delay = redder
-    const colorNorm = normalizeForColor(routes.map(r => r.avg_delay_s), true);
-    const barColors = colorNorm.map(t => scoreToColor(t));
+    const barColors = routes.map(r => delayToColor(r.avg_delay_s));
 
     new Chart(document.getElementById('delayChart'), {
       type: 'bar',
@@ -128,7 +124,7 @@ fetch('data/current_state.json')
       options: {
         plugins: {
           legend: { display: false },
-          title: { display: true, text: 'Average delay by route, this snapshot (green = on time/early, red = most delayed)' },
+          title: { display: true, text: 'Average delay by route, this snapshot (green = on time within ±1 min, red = late, blue = early)' },
           tooltip: {
             callbacks: {
               title: (items) => {
