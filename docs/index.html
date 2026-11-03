@@ -14,13 +14,21 @@
   #alerts.none { border-color: #2c9c4a; background: #f0f8f2; }
   canvas { margin-top: 2rem; }
   #updated { color: #666; font-size: 0.85rem; }
+  #staleness { display: none; padding: 0.7rem 1rem; border: 2px solid #c46e0a; border-radius: 8px;
+               background: #faf3e8; margin: 1rem 0; font-size: 0.9rem; }
+  #staleness.show { display: block; }
+  #lowActivity { display: none; padding: 0.6rem 1rem; border: 1px solid #ccc; border-radius: 8px;
+                 background: #f5f5f5; margin: 0.8rem 0; font-size: 0.85rem; color: #555; }
+  #lowActivity.show { display: block; }
 </style>
 </head>
 <body>
   <h1>SETRAM network — current status</h1>
   <p>Real-time delay and disruption snapshot for Le Mans Métropole's bus and tram network.</p>
+  <div id="staleness"></div>
   <div class="kpis" id="kpis">Loading...</div>
   <div id="alerts">Loading alerts...</div>
+  <div id="lowActivity"></div>
   <canvas id="delayChart" height="320"></canvas>
   <p id="updated"></p>
 
@@ -83,6 +91,23 @@ fetch('data/current_state.json')
 
     document.getElementById('updated').textContent = `Data last updated ${data.generated_at}`;
 
+    // GitHub Actions does not reliably honor a 15-minute cron -- runs have been
+    // observed several hours apart even though every run itself succeeds. So
+    // "stale" is flagged generously (3h), as a true statement about pipeline
+    // health, not as "something is broken": it usually just means the next
+    // scheduled run hasn't fired yet.
+    const STALE_AFTER_MIN = 180;
+    const ageMin = (Date.now() - new Date(data.generated_at).getTime()) / 60000;
+    const staleEl = document.getElementById('staleness');
+    if (data.generated_at !== 'not yet generated' && ageMin > STALE_AFTER_MIN) {
+      const hrs = (ageMin / 60).toFixed(1);
+      staleEl.classList.add('show');
+      staleEl.innerHTML = `<strong>This is the last successful run, from ${hrs}h ago.</strong> ` +
+        `GitHub's scheduler doesn't always run the collector every 15 minutes as configured -- ` +
+        `it can fall behind by hours, especially overnight. The numbers below are real, just not current. ` +
+        `<a href="https://github.com/Ismail-Achibat-TD-TP-BI/TD2/actions/workflows/collect_snapshot.yml">Run it now</a> for a fresh snapshot.`;
+    }
+
     const alertsEl = document.getElementById('alerts');
     if (!data.alerts || data.alerts.length === 0) {
       alertsEl.classList.add('none');
@@ -97,6 +122,17 @@ fetch('data/current_state.json')
       document.getElementById('delayChart').outerHTML =
         '<p>No route data yet -- trigger the collect_snapshot workflow from the Actions tab.</p>';
       return;
+    }
+
+    // Only trams run very late at night / very early morning -- a handful of
+    // routes with ~0s delay is real, not broken, but looks identical to a dead
+    // pipeline unless it's labelled.
+    const LOW_ACTIVITY_ROUTES = 10;
+    if (routes.length < LOW_ACTIVITY_ROUTES) {
+      const lowEl = document.getElementById('lowActivity');
+      lowEl.classList.add('show');
+      lowEl.innerHTML = `Only ${routes.length} route${routes.length === 1 ? '' : 's'} reporting in this snapshot ` +
+        `(normal daytime snapshots see ~25-28). This is very likely off-peak/overnight service, not a pipeline failure.`;
     }
 
     // Early is not "good": green only inside the on-time window, then red for late
@@ -138,7 +174,17 @@ fetch('data/current_state.json')
             }
           }
         },
-        scales: { y: { title: { display: true, text: 'Average delay (seconds)' } } }
+        // Fixed bounds, not Chart.js's auto-scale: when every route is near 0s
+        // delay (quiet overnight service), auto-scaling to that tiny real range
+        // renders bars too small to see against the gridlines -- indistinguishable
+        // from a genuinely empty chart. A fixed ±90s floor keeps bars visible
+        // even when the real values are all close to zero.
+        scales: {
+          y: {
+            title: { display: true, text: 'Average delay (seconds)' },
+            suggestedMin: -90, suggestedMax: 90
+          }
+        }
       }
     });
   })
